@@ -1,0 +1,550 @@
+
+Converting the monolithic job app to microservices architecture:
+================================================================
+
+Planning our changes:
+---------------------
+
+1. To get traffic of particular service, the ports should be defined unique for each service. So lets break one app into three different apps, with the respective ports and dependencies.
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Job Service:
+============
+	a. Create a new application from start.spring.io, with dependencies - SpringDataJPA, H2 and web.
+	b. Open the application as new project and start refactoring. Copy the job package from monolithic app and paste into the new app. Refactor the errors. This time rather than using company object and mapping, use only company id as reference because now company will be new service.
+	c. set server.port=8082 for jobs and also configure H2 database.
+	d. do some testing and move to next service.
+
+Company Service:
+================
+	a. Create a new application from start.spring.io, with dependencies - SpringDataJPA, H2 and web.
+	b. Open the application as new project and start refactoring. Copy the company package from monolithic app and paste into the new app. Refactor the errors. This time rather than using job & review object and mapping, remove them.
+	c. set server.port 8081 for company and also configure H2 Db.
+	d. do some testing and move to next service.
+	
+Review Service:
+===============
+	a. Create a new application from start.spring.io, with dependencies - SpringDataJPA, H2 and web.
+	b. Open the application as new project and start refactoring. Copy the review package from monolithic app and paste into the new app. Refactor the errors. This time rather than using company object, company service, use companyId for company mapping and also remove all use of companyId from methods where only review id is enough. The companyId is required for POST and GET_ALL methods only.
+	c. The restructuring of request urls also required as not, the service will start from review only and now the companyId will be provided through query paramters not path variables. So to accept companyId we need @RequestParam annotation. Also update controller according to the services. The new request will look like:
+		http://localhost:8083/api/v1/reviews?companyId=1 ---> companyId this name should match the method argument variable name.
+	We use query parameters when the required value don't exists in our hierarchy, its an externally accepted value. The path variables are the variables that will be in hierarchy.
+	c. set server.port 8083 for company and also configure H2 Db.
+	d. do some testing and move to next service.
+	e. Move the docker-compose file in any one service and start from there. Otherwise recommended approach says that you should keep that file in the root directory under which all apps are going to use.
+	
+Migrating from H2 to PostgreSQL:
+================================
+	1. Copy the configuration of monolitihic application for PostgreSQL and add it to respective new applications, by updating name of the databases they are going to use. Create those databases into pgadmin dashboard in postgres.
+	2. Also add PostgreSQL dependency in each pom.xml file.
+	3. Start the services and see tables are created or not.
+	4. Do some tests and check whether the data is logging or not.
+	NOTE: Make sure the databases are created in the server before starting application, otherwise it will fail to start.
+
+Inter-service communication using RestTemplate:
+===============================================
+The inter-service communication is necessary because we want our services to act as one application to for the client who is interacting with them. To provide that service, the small services should communicate with each other. This communication can be in two ways, synchronous and asynchronous communication. In synchronous communication, protocols like HTTP,REST are required where the client will wait for the response. While in case of asynchronous communication, the softwares like queue mechanisms, apache kafka are required in which the client will consume the message from queue once the message is ready.
+
+RestTemplate:
+-------------
+It is a class in Spring framework that helps in exchanging data from one service to another over HTTP protocol, without focusing on minute details. It will handle all underlying configurations.
+
+Advantages and Features:
+
+1. Abstraction, the RestTemplate provides a simple method interface to communicate through HTTP protocol without focusing on underlying complexities.
+2. Versatility, the RestTemplate can handle all kind of HTTP requests like get, post, put etc.
+3. Conversion, the RestTemplate makes it easier to convert the incoming response in json, string or any java object as per the requirement.
+4. ErrorHandling, the RestTemplate provides multiple errors for different kind of http responses.
+5. Integration, the RestTemplate is present in Spring library so it can easily integrate with other spring classes and libraries.
+
+The RestTemplate follows blocking mechanism, means it will wait for the response of another service, before going forward. Due to this well suites in synchronous comunications, for asynchronous communication, an alternative should be searched.
+
+Implementing inter-service communication:
+-----------------------------------------
+	1. Create an object of RestTemplate in the method where you want to communicate to other service, like restTemplate.
+	2. use restTemplate.getForObject(<url as string>, ClassName.class); now you are requesting a url and mapping its response to ClassName object. Now, you have to create the classes from other microservices to handle their objects. These classes should be created in an external package to maintain proper understanding. In this new class you can avoid the db mapping etc. things because you just want to use object.
+	
+DTO Pattern: Data Transfer Object:
+==================================
+Design pattern used to tranfer data between software application subsystems. In context of API, it is a pattern where we decides how the client should get response against the API, he requested. Like in our context we want that when a user requests all jobs, he should get response as all jobs along with the company details it is mapped to. So DTO will have response from both services and then it will be transferred to the user.
+DTO pattern helps us to have better control on the response that we are sending to the client.
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JOB  <--------------- |     |<------ Job MS
+ +					  | DTO |
+COMPANY <------------ |     |<----------- Company MS
+------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Implementing DTO in Job MS to return customized response:
+---------------------------------------------------------
+	1. Create a package with name dto where we will keep all DTO classes. So first class will be JobWithCompanyDTO.
+	2. Declare two private variables, of job an company type as we need them here.
+	3. Modify the service, as all the business logis lies there. When findAll is called from controller, you should return a list of DTO class objects.
+	4. Rather than keeping the code in main service method of controller keep irrelevant code in another method, so that code and business logic looks clean.
+	
+What is service registry and its role in microservices architecture:
+====================================================================
+Service registry is a way of communicating other services through dynamic service discovery. Accessing services using hard-coded urls is not a good practice as it may cause errors and communication cumbersome. Service registry can be considered as a directory for all services. In technical terms it is a kind of database populated with all the services existing in the network or those which are registered to the registry. When a services shuts down, its registration got cancelled. The inter-service communication in this way happens in following steps:
+	1. A service register itself to the registry.
+	2. Another service sends a "Service Discovery Request" to the registry.
+	3. Then the request is sent to the registered service.
+
+All the services that wanted to be discovered in network, will register to the service-registry. Once a service wants to communicate with other microservice, service registry will help with that.
+
+Benefits of service registry approach:
+--------------------------------------
+a. Dynamic Service Discovery, the service registry helps to get services discovered dynamically rather than hard-coding the urls. It is beneficial because in microservice architecture services are very loosely coupled, so any service go down anytime, can be moved to any server. That's way that approach is not recommended.
+b. Load Balancing, the service-registry can help you have multiple instances of a service so that if a huge traffic is coming to your service it can be handled properly.
+c. Fault tolerance and Resilience, it is the feature required when an instance or a particular service is went down. The service registry is aware of the instances which are down. So it will update or route incoming requests according to requirements.
+d. Scalability and Elasticity, the service registry helps to scale up the existing system by providing facility to register more services and make them available for communication with other services.
+e. Service Monitoring and Health Checks, the service registry provides features like monitoring health of each service, running periodic health checks for the services.
+
+The most popular service registry solution we are going to use is Spring Cloud Eureka also known as Spring Cloud Netflix, because it is developed by netflix for there internal solutions, but then they made it public. So when we add the dependency we will get a separate eureka server for managing our service registry.
+
+Adding separate Eureka Server in our project:
+---------------------------------------------
+	1. We are going to use a separate eureka server, a new application will be created  with two dependencies web and eureka server only, not service discovery.
+	2. Add an annotation, @EnableEurekaServer on the main class responsible for running the application. This will make our application as eureka server and now all features of maintaining service-registry are available. Add following properties to the application.properties file.
+		spring.application.name=service-registry
+		server.port=8761
+		eureka.client.register-with-eureka=false --- #DO THIS APP NEED TO REGISTER TO EUREKA, no because it is itself a server.
+		eureka.client.fetch-registry=false --- #DO THIS APP NEED TO FETCH THE REGISTRY, no because it is itself a server.
+	3. Now start the application and head over to defined port 8761 to see GUI and details of the application.
+	
+Registering an application to service-registry:
+-----------------------------------------------
+	1. Add dependency "Eureka Discovery Client", in the application you want to registry. Along this an additional dependency for spring cloud also need to be added. Copy these two dependencies in your service pom.xml. Also add version of the spring cloud to the pom.xml. Otherwise it is better to add these dependencies during project initialization, to avoid these manual configurations.
+	2. These properties are already set with default values, but when spring profiles come in to picture, defining these properties will be a need. So, its a good practice to add these properties. Now add these properties to application.properties file:
+		eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka/ --> URL for eureka server.
+		eureka.client.register-with-eureka=true
+		eureka.client.fetch-registry=true
+	Note: Also make sure property spring.application.name is defined in the properties file otherwise, it will be registered with unknown as name.
+	3. Repeat the same process for other microservices.
+	4. The external clients cannot communicate to services using there names. To do so, we need to define a gateway because eureka is a service registry not a router.
+	
+Setting up inter-service communication between two registered services:
+=======================================================================
+Ideally the inter-service communication is done using the service names. But this cannot be done, with RestTemplate because it is not load balanced. To do so, Create a class AppConfig with @Configuration annotation with a method returning, RestTemplate object. Add @Bean and @LoadBalanced annotation to let spring manage the initialization of this object. This annotation creates a proxy of restTemplate under the hood, which will be capable enough to have information about all the services in the registry. It automatically resolves the service names.
+To use this bean in service class, either use @Autowired annotation on variable name, or add the variable in constructor, it will be created when the service class is instatiated.
+
+Let's update the response of getting a single job with company object not only id, by returning a DTO object for this service too. You can modify the response by providing only required information in the DTO response using custom mapper method, where you will take job object but set only required properties to JobWithCompanyDTO object. For that you have to add particular variables. The mapping method should be static, so that it can be used without object also.
+
+Now, add reviews also to the company for a particular job:
+----------------------------------------------------------
+	1. Update the DTO class and add the review variable.
+	2. Since, we will be having a list of reviews for particular company, we will use exchange method of RestTemplate. getObject is used when you know the response type. But this time response will be a generic type.
+	3. exchange("url",HttpMethod,RequestEntity <if post>, new ParameterizedType<List<Review>>(){}) --> returns response entity. Then to get list, List<Review> list = responseEntity.getBody();
+	
+Behind the scenes of service-registry:
+======================================
+Each service register itself and send meta-data info like ip address, url, status, current health while registration. After that periodic heartbeat signal is sent by each microservice to eureka server, to acknowledge that the service is up. The heartbeat signal interval can be configured as per the requirements. The eureka server, do a heartbeat monitoring like if the signal of any service is not reached for a certain amount of time, it will mark that instance/service as down.
+
+----------------------------------------------------------------------------------------------------------------------------
+OpenFeign and Feign Client:
+===========================
+Feign is a declarative web service client designed to make HTTP clients easier. OpenFeign reduces the boiler plate code of writing urls for a microservice again and again. It allows you to make simple function calls for the service and handle everything else from background.
+
+Why use OpenFeign:
+------------------
+OpenFeign is easy to use. It allows you to make HTTP API calls, as proxy like http request handling everything at an abstract level, decreasing your boiler plate code. It can easily integrate with Eureka and it has built-in load balancer with Ribbon, ribbon is another netflix project and this provides client side load balancing. OpenFeign supports for fallbacks and circuit breakers by integrating with histrix which is another netflix project, which have support for fallbacks and circuit breaking.
+
+Enabling Feign Clients:
+-----------------------
+1. Add openFeign dependency in your project and after that add @EnableFeignClient annotation with @SpringBootApplication in your project.
+2. Create a new package for managing and adding feign clients. In that package create a client interface for ech service with annotation @FeignClient(name="service-name"). Inside the interface define methods with respective @HttpMethod like @GetMapping("url"), @PostMapping(""), etc. with Pathvariables and in the method accept that path variable and also define return type. Everything else will be handled by Feign.
+
+Points to be noted:
+-------------------
+In RestTemplate based API calls, we were using bean configuration for making it load balanced. But in case of FeignClients we are not using such annotations because it is already integrated internally with Ribbon which also works behind the scene in case of @LoadBalanced annotation. If you are shifting completely from RestTemplate to openFeign you can delete that rest template configuration.
+Also if, some day service name changes, you just need to make change at one place in client not every place. Another benefit of using this.
+
+----------------------------------------------------------------------------------------------------------------------------
+Distributed Tracing:
+==================== 
+To trace the path of a request from start to end, in case of monolithic architecture is easy by logging it at each step. But in case of distributed systems, not all services will be on same server, not same language, not same network. In such cases the tracing will be distributed. 
+Distributed Tracing enables you to trace your request from start to end. In other words, tracing a request from its inception through all other microservices and till its completion.
+
+Problems that Distributed Tracing solves:
+-----------------------------------------
+Request Visualization, allows you to visualize the flow of request from its origination till end.
+Identify Performance Bottleneck, with traces, you can see the time taken by request at each microservice and can try to improve that particular service.
+Error Analysis and Debugging, as tracking happens at each microservice, it will be easier to find from trace which service failed and why.
+Tracking Dependency, like which service is waiting for which service and inter-service dependencies so that you can decide that how a change in one service can affect others.
+Performance Optimization, as we discussed it notices timings and resources at each microservice, so we can use those metrics to optimize the services and improve the performance.
+
+Also helps in maintaining SLAs and if some service incident occurs, it wil be easy to be traced and resolved.
+
+Introduction to Zipkin:
+=======================
+Zipkin is an open-source distributed tracing system. So under the hood, zipkin contains following components:
+	a. Collector - This is responsible for collecting the request traces from https, kafka, rabbit mq, etc.
+	b. Storage - After collecting the trace data it is stored in storage like Mysql, Cassandara, elastic search etc.
+	c. Search - You can perform search for different parameters in the trace that are stored.
+	d. Visualization - provide a user friendly flow of how the request is moved, where it spent how much time and so on.
+	
+Span vs Trace in Zipkin:
+------------------------
+The whole transaction from creating an request till getting response is called trace and identified by trace id. A trace is composed of spans that are identified by Span Ids and represents the basic unit of transaction and collects data about the service that processed the request.
+			
+Introduction to Micrometer:
+===========================
+Micrometer provides insights that helps to keep eye on the performance of an application. Tool to check your applications performace.
+
+How micrometer helps?
+---------------------
+Each metrics collector application has there own ways of collecting metrics, managing them and monitoring. So to decrease the complexity of integrating a metric collector application to our application, the micrometer can help you out.
+
+	1. Helps you collect metrics from your application.
+	2. Acts as a middleman or a bridge between your application and the metrics collection systems.
+	3. It offers a vendor-neutral interface.
+	4. You can abstract away the complexities of interacting with different metrics collection systems.
+	5. Micrometer simplifies the process of collecting metrics from your application.
+	
+Micrometer and Zipkin, both tools are not replacement to each other, they are complimentary to each other. Micrometer provides an aggregated view of the traffic that is coming to the application. While Zipkin, provides a request level insights for each a transaction.
+
+Intergration of Zipkin with SpringBootApplication using micrometer:
+-------------------------------------------------------------------
+	1. Go to start.spring.io and take dependency for zipkin which comes with two dependencies, zipkin bridge and micrometer along with spring actuator. micrometer --> brave --> zipkin. This is the flow that followed during tracing.
+	2. Since you are using, feign in your project you have to add an additional dependency feign-micrometer.
+	3. Add a property management.tracing.sampling.probability=1.0. Means how much percent of requests you want to trace one means 100%.
+	NOTE: While adding dependencies, remember that scope is runtime, because test may not work as per the requirement.
+	
+Best Practice and Troubleshooting:
+----------------------------------
+Missing trace problem -- can be due to low sampling rate.
+Use consistent naming-conventions for services that is easily recognizable.
+Secure your zipkin server, as requests may come with sensitive information.
+Remember --> Distributed tracing does come with a performance impact. So keep that trade-off in mind. Adjust the sampling rate to improve the performance and decrease the impact of tracing.
+
+----------------------------------------------------------------------------------------------------------------------------
+Setting up config server:
+=========================
+Configuration Management:
+-------------------------
+- Means managing and controlling the configurations of each microservice.
+- Configuration may include details such as db connections, external service urls, caching settings, etc.
+- Challenge --> As the number of microservices increase in the system, managing individual configuration can become a complex task.
+- A centralized config server provides a central place for managing configurations across all microservices.
+- It simplifies configuration management and increases operational efficiency.
+
+Features of a config server:
+----------------------------
+- Centralized and versioned configuration
+- dynamic updates, means configurations will be updated without app restart.
+- security, encrypted and decrypted values of passwords and etc. sensitive information.
+- application and profile specific configuration
+
+Benefits:
+---------
+- single source of truth
+- easier to manage and update configuration
+- enhances security and control
+- easy to deploy and scale microservices.
+
+Spring Cloud Config Server:
+---------------------------
+The Spring Cloud config server, is backed by git. When you create configs they are managed at git behind the scenes. It provides benefits like storing, serving and refreshing configurations using actuator, easy integration with spring boot, support for different environments and also supports encryption/decryption. In summary, this server manages configuration in a controlled, versioned and secured way.
+
+	Let's setup Config Server:
+	--------------------------
+		1. Create an application that will act as a configuration server with dependencies config server and eureka discovery client.
+		2. Add eureka properties and also add @EnableConfigServer annotation on the main class.
+		3. Creating a git repository which will be used by our config server for fetching and storing configurations. Create a public repository and also an application.properties file in that repository.
+		4. Set this property in the application's application.properties file. spring.cloud.config.server.git.uri=<repository-url>, without git uri the application won't start.
+		5. After starting the server, head to browser and go to localhost:8080/fileName/profile, as of now we have application.properties in git repo, and default profile because nothing is added. So, go to localhost:8080/application/default to see the properties that are fetched.
+		6. You can have multiple properties file with different profiles, just define file name as application-profile.properties. For each profile,it will return that profile's configuration and also the default configuration.
+	
+	Setting-up Config Server Client:
+	--------------------------------
+		1. Add the config client dependency in the service and also add a property in the application.properties file of the service, like from where it should fetch properties. Set spring.config.import=configserver:http://localhost:8080 to define activate a profile, add spring.profile.active=<profile-name>. Right now, if the config server at localhost:8080 is down, then application will not start as it is dependent on that and it is not optional. So to make that optional, use optional:configserver:http://localhost:8080.
+
+----------------------------------------------------------------------------------------------------------------------------
+API Gateways with Spring Cloud Gateway:
+=======================================
+Intro to API Gateways:
+----------------------
+- Act as a single entry point for the application. It will route the request to particular microservice according to routing defined. This simplifies the client side experience and masks the internal complexity from the external user.
+- API gateway encapsulates the internal system architecture and provide an abstraction for internal functionalities to the outside world.
+- Handles cross-cutting concerns like security, load balancing, rate limiting and analytics.
+- Can authenticate incoming requests and pass only valid requests.
+- Can aggregate responses from different microservices.
+Hence, plays a crucial role in simplifying client interactions and managing cross-cutting concerns.
+
+API Gateway functions:
+----------------------
+- Request Routing
+- Load Balancing
+- Authentication and Authorization
+- Rate limiting, means limiting the number of requests a client can make to your app in a given period of time.
+- Request and Response Transformation
+- Aggregation of data from multiple services
+
+Now, the architecture of our app will look like something a request will come from client to API gateway layer and the passed into layer where all microservices are residing. Then the request will be resolved in this layer and response is sent back. The other tools like eureka server, config server and zipkin will also reside outside the API gateway.
+
+Setting-up Spring Cloud Gateway:
+--------------------------------
+1. Create a new application with dependencies - zipkin, reactive gateway, eureka discovery client.
+2. Add eureka properties, add zipkin probability in application.properties.
+3. Addition to that add some extra properties for routing:
+	spring.cloud.gateway.routes[i].id=<unique-id-for-route>
+	spring.cloud.gateway.routes[i].uri=<host:port of the service>
+	spring.cloud.gateway.routes[i].predicates[j]=<Path=/service/**> -- ** means wildcard for all sequence of characters. predicates defines the condition to route to this service.
+4. Add some other logging properties in the file, to see what is happening BTS.
+	logging.level.root=info
+	logging.level.org.springframework.cloud.gateway.route.RouteDefinitionLocator=INFO
+	logging.level.org.springframework.gateway=TRACE
+	
+http vs lb:
+-----------
+spring.cloud.gateway.routes[i].uri=<host:port of the service>, like http://localhost:8081, in case of http, the request coming to the particular url, will be directed and the responses are sent back. The basic http working. But if you update the url, lb://<service-name>, like lb://JOB-SERVICE, the lb here stands for load balancer. So, in this uri definition the requests for this service will be routed the instances of the service mentioned. The lb is Spring Cloud functionality, that behind the scenes uses Sring Cloud Discovery Client mechanism to find the instances of service that is mentioned.
+
+Why you should choose lb over http?
+-----------------------------------
+If you have only one instance of your service, you can go for the http, but if you have 10 instances of a service, you want your requests to be distributed evenly, on each instance. That's why, the lb should be preferred. In case of http, you are defining that my request should go to this instance, but in case of lb, you are specifying that I want to get my request executed, no matter which instance.
+
+How to create one more instance of any application in IntelliJ:
+---------------------------------------------------------------
+	a. Go to drop down where run application is defined, and expand the drop down.
+	b. Go to run configuration and copy the service which you want to scale-up, like increase instances.
+	c. After copying the app config, you have modify the configuration from option and add -Dserver.port=9082, because you just want another instance and run the app.
+	d. To verify that you have two instances go to eureka server dashboard and verify.
+	
+In summary, if you know that the service port have only one instance and its port will never change, then you can go with port. But if not sure and want to use discovery client to do that for you, use lb://<service-name>.
+
+Routing eureka service requests also through gateway:
+-----------------------------------------------------
+Define following routes to do that:
+	spring.cloud.gateway.routes[i].id=eureka-server
+	spring.cloud.gateway.routes[i].uri=http://localhost:8761
+	spring.cloud.gateway.routes[i].predicates[j]=Path=/eureka/main
+	spring.cloud.gateway.routes[i].filters[0]=SetPath=/ --> means that if someone hit the path, it should not route to that path on server because it is not there, it should go to / means the root url.
+
+If you find that the html, css and js for the eureka homepage is not loaded, you can use following routing also.
+	spring.cloud.gateway.routes[4].id=eureka-server-static
+	spring.cloud.gateway.routes[4].uri=http://localhost:8761
+	spring.cloud.gateway.routes[4].predicates[0]=Path=/eureka/**
+	
+Now, we are routing everything through gateway. The need of routing eureka server through gateway is, now if someone is administering our services they will also use the same host and port, for administering the services.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Fault Tolerance and Circuit Breaking:
+=====================================
+
+Introduction to fault tolerance:
+--------------------------------
+Fault tolerance means ability to continue operating without interruption. So, the need of fault tolerant systems is as follows:
+	a. fault isolation, means when a service is down, the entire system should not be affected.
+	b. Network Latency, issues with network may be there.
+	c. deployment issues, like when you are updating a service, there may be some downtime or start, how to manage that.
+	d. elasticity, means if there is a need to scale up, then your app should be resilient enough that it should scale up-down properly.
+	e. tolerating external failures, like if the dependency of our current service went down.
+	
+Resilience4J:
+-------------
+Resilience is the ability or capacity of a system to recover quickly from difficulties. Some techniques to make system resilience are retries, rate limiting, bulkheads like dedicating a separate resource for high demand service to avoid other service failures, circuit breaker when a service communicating to other service goes down, then the fault should be handled gracefully, by routing request to fallbacks or providing error response, fallbacks they are the alternate mechanisms that are used to handle any fault, by providing values from cache or some default values, so that user experience should not harmed. So fallbacks are configured to provide some response to the user, if primary service is down, timeouts, graceful degradation means disabling the components that are consuming high resources to make essential services keep going.
+
+Resilience4J is a light-weight, easy-to-use fault-tolerance library. Best part, it is designed to be integrated with Spring boot applications. Also a good choice because it is built for functional programming paradigmns. Some important modules of Resilience4J library are Retry Module, RateLimiter, Bulkhead, Circuit breaker which is used to block further calls to the service, if a system is down.
+
+
+Introduction to Circuit Breaking:
+---------------------------------
+The Circuit Breaker pattern in microservices acts as a safeguard against service failures by monitoring interactions, setting thresholds, and temporarily halting/Stoping traffic to failing services.
+
+To add resilience4j to the project, we will add cloud-starter-circuitbreaker-resilience4j dependency and also spring-boot-starter-aop.
+
+Implementing circuit breaker in application:
+--------------------------------------------
+First, you need to add actuator, and enable the health endpoint. Also we want to fetch some additional details from the application, so add following properties to the application for actuator.
+	management.health.circuitbreakers.enabled=true
+	management.endpoints.web.exposure.include=health
+	management.endpoints.health.show-details=always
+	
+Resilience4J properties:
+------------------------
+#through this we are registering the companyBreaker for listed in health end point.
+resilience4j.circuitbreaker.instances.companyBreaker.registerHealthIndicator=true
+
+#number of requests stored in the circuit breaker. Used to calculate success and failure rate.
+resilience4j.circuitbreaker.instances.companyBreaker.slidingWindowSize=10
+
+#number of requests sent before calculating failure rate.
+resilience4j.circuitbreaker.instances.companyBreaker.minimumNumberOfCalls=5
+
+#number of requests allowed in half open state.
+resilience4j.circuitbreaker.instances.companyBreaker.permittedNumberOfCallsInHalfOpenState=3
+
+#duration for which the circuit will be in open state.
+resilience4j.circuitbreaker.instances.companyBreaker.waitDurationInOpenState=10s
+
+#means if failure rate is more than 50% change the state to open state.
+resilience4j.circuitbreaker.instances.companyBreaker.failureRateThreshold=50
+
+#registering the health indicator to actuator and adding to health end-point, same as first property. Why 2?
+resilience4j.circuitbreaker.instances.companyBreaker.register-health-indicator=true
+
+#allows automatic transition of open to half-open state.
+resilience4j.circuitbreaker.instances.companyBreaker.automatic-transition-from-open-to-half-open-enabled=true
+
+#in this type of sliding window, the last n calls are recorded and used to calculate failure rate.
+resilience4j.circuitbreaker.instances.companyBreaker.sliding-window-type=count_based
+
+NOTE: For more information, go to documentation and search for "Create and configure a circuit breaker".
+
+Add @CircuitBreaker annotation on the top of the findAll() method in the JobServiceImplementation class. with name you have used in properties file.
+The output of circuit breaker in the health endpoint of actuator will look like:
+	"companyBreaker": {
+          "status": "UP",
+          "details": {
+            "failureRate": "-1.0%", //shows the percentage of requests that have been failed. negative means not enough requests.
+            "failureRateThreshold": "50.0%",
+            "slowCallRate": "-1.0%", //percentage of requests that are slower than the threshold.
+            "slowCallRateThreshold": "100.0%",
+            "bufferedCalls": 0, //the number of requests that are recorded by breaker, successfull and failure both.
+            "slowCalls": 0, 
+            "slowFailedCalls": 0,
+            "failedCalls": 0,
+            "notPermittedCalls": 0,
+            "state": "CLOSED"
+          }
+        }
+
+When circuit is open, CallNotPermittedException will be thrown. After 10 sec the circuit will be in half-open state, but if 3+(configured) failed requests came it will go to open state. You can add a fallback mechanism, by adding a method name in the @CircuitBreaker annotation and then defining that method to handle the situation. Means when any service is down, provide error message or dummy data or default data.
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Adding Retry Mechanism:
+-----------------------
+To use retry mechanism, define @Retry annotation with same parameters, the name of circuit breaker and the name of fallback method. In application.properties file add two more properties.
+	resilience4j.circuitbreaker.instances.companyBreaker.max-attempts=5 #number of retries.
+	resilience4j.circuitbreaker.instances.companyBreaker.wait-duration=2s #wait before making another call.
+	
+------------------------------------------------------------------------------------------------------------------------------------------------------
+What is rate limiting and why is it needed?
+-------------------------------------------
+Rate limiting is a technique for limiting the network traffic. Restricts how many requests a client can make to a server to manage the resources efficiently. Can be used to avoid fake and spam account creation on a website, by limiting only one account permitted in 10 mins.
+The benefits of rate limiting includes:
+	a. Preventing abuse, means to avoid the spam of too many requests to the service/application
+	b. Resource Allocation, to manage the resources that are assigned to the service.
+	c. Cost Management, when the resources will be allocated properly, the cost will also be managed.
+The uses of rate limiting are:
+	a. APIs, to avoid unwanted heavy loads or to avoid too many requests from single user in small interval.
+	b. Web Scraping, to avoid the extra loads of web scrapers on to the servers.
+	c. Login Attempts, to prevent the services from too many login attempts from outside. like login attempts exceeded try after some time.
+	
+Implementing rate limiting in the application:
+----------------------------------------------
+The properties that need to be added into the application.properties file:
+	
+	#after how much time of wait the requests should be rejected. 0 means reject immediately.
+	resilience4j.ratelimiter.instances.myRateLimiter.timeoutDuration=0
+	
+	#after how much time the limit will be refreshed
+	resilience4j.ratelimiter.instances.myRateLimiter.limitRefreshPeriod=4s
+	
+	#how many requests allowed in the period
+	resilience4j.ratelimiter.instances.myRateLimiter.limitForPeriod=2
+	
+Means two calls every 4 seconds are allowed. If any other request come within that period, it will be rejected immediately as we set timeout-duration as 0.
+
+To test this, we will download the jmeter to test the load. So download the binary zip, unzip that and run the zip file from bin. After that create a thread group and then create a sampler for http. add details, like protocol, host, port, url, etc. Before starting save it and then right click on the sampler, go to listener and then go to Result tree.
+Try to keep, the name of the implemented methods like retries and rate limiter etc. with different names.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Message Queues with Rabbit MQ:
+==============================
+Job Service ------->| Message Queue |-------> Review Service
+
+Need for Message Queues:
+------------------------
+Decoupling: when there is message queue involved then, the communication between services will be asynchronous and the need of one application to have info about other services. So each service can operate indepedently without having specific details of other app.
+Asynchronous Communication: when there is no need of instant responses or acknowledgements, the message queues can be used.
+Scalability: queues allows the services to work indepedently with there pace, as the messages will be buffered in the queues and no additional load if one service is scaled up and another not.
+Fault Tolerance: add an extra layer of fault tolerance, if any service is down, the message will be stored in the queues.
+Event-driven architecture: adding event-driven architecture, means a service can publish messages and other service can subscribe for the published messages.
+Time decoupling: means each service can process message at their own pace.
+
+Message Queue - a form of an asynchronous service-to-service communication used in serverless and microservices architecture. Each message is processed and consumed only once by a service.
+Producer is the service that produce messages and put it into the queue. Consumer are the services that consume these messages and process them.
+
+How to choose the better message broker for your project:
+---------------------------------------------------------
+a. Scalable - if you want to have large number of messages to be processed, use cloud based queueing services.
+b. Reliability - use RabbitMQ or Apache ActiveMQ, as both have strong message durability and delivery.
+c. Simplicity - cloud based services provides simpler solutions as everything is managed by cloud provider
+d. Cost - RabbitMQ is open source and can be used on your server. While cloud services are pay as you go service.
+
+Problem statement where we are using RabbitMQ:
+----------------------------------------------
+Review service is maintaining individual review details and ratings, but we want to store average rating of a company in its DB. So for that, the communication need not be synchronous, because it is used by company service internally to maintain the average. The review service is nothing to do with that, so it should not wait for company service response. Therefore, review service will put message in the queue and company service will fetch and maintain average. We will be using rabbitmq from docker, so following service should be configured in docker-compose file.
+		
+Publishing and Consuming messages:
+----------------------------------
+According to our use case, the review service will be the publisher of the message and the company service will consume those messages.
+
+1. Create a new package with name "messaging" and a class for configuring RabbitMq.
+2. Create a method that will return a queue object, with name you want to give, right now: "companyRatingQueue". Create a method that will be reponsible for converting messages, means for serializing and de-serializing the messages. The method will have return type as MessageConverter and it will return Jackson2JsonMessageConverter object. Create a method for returning new RabbitTemplate object with the message converter set into that template. This method will have the input parameter as a final connectionFactory. The RabbitTemplate class is helper class that will be responsible for creating and releasing the resources. All classes should be imported from org.springframework.amqp.*. Everything should be annotated with spring annotations, @Configuration and @Bean.
+3. Create a DTO with long id, title, description, rating and companyId, in new package. We will use this message for sending to the company service using the queue service.
+4. Create a producer in the messaging package to put messages in the queue. Add the object of RabbitTemplate that will be auto wired from the configuration. After that create a method for sending message, in that take review object as input parameter and set properties in DTO using the review object. After that use convertAndSend method of rabbitTemplate to send message with queue name and dto object. Add @Service annotation on the producer as it will be managed by the spring.
+
+Consuming message from company service:
+_______________________________________
+1. Copy the dto and messaging package into the company microservice and remove the producer class as company will be the consumer, not the producer.
+2. Create a company service object and create a method to update the rating. After that create a method for consume message annotated as @RabbitListener(queue="") and just updating the company service with the input message as ReviewMessage.
+3. Add @Service annotation on the consumer as it will be managed by the spring.
+
+Testing the changes:
+--------------------
+After doing so go to controller of review and if the review adding is successful, call the message producer's send message. Once this is done create a review and see the dashboard that the queue is added or not.
+
+Calculating the average rating:
+-------------------------------
+1. Go to review service and create a new end-point of get mapping to get the average rating of the company whose id is passed inside the request parameter. use stream.mapToDouble.average method to calculate average of all the reviews in list. This list of reviews will be from companyId.
+2. after creating this, add openFeign dependency in the company service as it will call the review service's method to get average rating and store it into the db. Also add a new field in the company object.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Microservice Packaging:
+=======================
+
+Execution of Spring Boot Aplication:
+------------------------------------
+a. Code Compilation.
+b. Running the main class.
+c. Classpath and dependencies
+d. Embedded server
+e. Source code changes
+f. Development mode
+
+Packaging:
+----------
+involves compiling your source code into bytecode, bundling it with any dependent libraries and creating a single, executable artifact that can be easily distributed and run. The JAR, java archive is the most popular form of packaging in java codes. It provides multiple benefits like simplified deployment, inclusion of everything ou application requires, JRE executes JAR files. Other packaging options are WAR, EAR and docker-image.
+
+Steps involved to package microservices into jar:
+-------------------------------------------------
+1. To package the app into jar, we need to run mutliple maven commands, so download maven. But the spring boot project contains maven wrapper that can be used to package the app without explicitly downloading the maven. 
+
+	Some important commands:
+	________________________
+	These commands are used when you have installed maven, but with wrapper they will change.
+	mvn clean - to clean all the auto generated files from the last build. 
+	mvn package - packages the source code in its distributable format, stored in target folder. for wrapper, ./mvnw package
+	mvn clean package - combination of above two.
+	
+2. Make sure all the external dependencies for the application are up and running, like zipkin, postgres, etc.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Docker with spring boot:
+========================
+Now, we will move every service, like company, review, job, etc. all to the docker, their db will be on docker, their gateway will be on docker and everything will be managed by the docker-compose file. Right now we are using the localhost everywhere in the db, etc. But now we are moving everything to docker, so we need to have a config server, with profiles and with proper server names for each profile or the environment.
+
+Preparing the project for Docker:
+---------------------------------
+1. Copy and paste the application.properties file, in same location and rename it as application-docker.properties.
+2. In that file, replace the localhost with the name of the container of that particular service. Since we are not using the localhost, we have to explicitly define the zipkin endpoint, so add a property management.zipkin.tracing.endpoint=http://zipkin_container:9411/api/v2/spans.
+3. We are using service names in the clients, but there may be a chance that in docker this name may change, so add the properties for service urls, that can be used in java classes. These will be custom properties like job-service.url=http://job_container:8082, ans so on.
+4. In the client class, add a new parameter url="${property_name}", defined in the properties file.
+5. According to used components in other services create properties file for others too.
+
+Dockerizing Microservices:
+--------------------------
+1. Create images for our microservices and push that image to docker hub repository, using the following command:
+--------------------------------------------------------------------------------------
+./mvnw spring-boot:build-image "-Dspring-boot.build-image.imageName=username/anyname"|
+--------------------------------------------------------------------------------------
+docker push username/anyname    |
+---------------------------------
