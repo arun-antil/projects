@@ -1,0 +1,4 @@
+The database names in postgres for each service are as follows:
+job-service -> job
+company-service -> company
+review-service -> review
